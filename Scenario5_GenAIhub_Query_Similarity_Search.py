@@ -1,12 +1,14 @@
 
-"""In this scenario, we show how we could use genaihub SDK to retrieve embedded response from SAP HANA Cloud Vector.
-   We use two of the foundation models. Based on the user prompt, we use the "embedding model" to convert the user prompt
-   to embedding. We use COSINE SIMILARITY to retrieve the closest embedding from the HANA DB. Then the corresponding
-   text is retrieved along with the source file, actual text, and scoring.    
-   Then we provide the retrieved text as input to the "falcon" model to determine the sentiment of the text.
-    Please install the necessary packages 
-    pip install generative-ai-hub-sdk || hdbcli || hana_ml || python-dotenv || shapely    
+""" 
+In this scenario, we show how we could use genaihub SDK to retrieve embedded response from SAP HANA Cloud Vector.
+We use two of the foundation models. Based on the user prompt, we use the "embedding model" to convert the user prompt
+to embedding. We use COSINE SIMILARITY to retrieve the closest embedding from the HANA DB. Then the corresponding
+text is retrieved along with the source file, actual text, and scoring.
+Then we provide the retrieved text as input to the "falcon" model to determine the sentiment of the text.
+Please install the necessary packages
+pip install generative-ai-hub-sdk || hdbcli || hana_ml || python-dotenv || shapely
 """
+
 # Load all necessary packages
 from gen_ai_hub.proxy.native.openai import embeddings
 from gen_ai_hub.proxy.native.openai import completions
@@ -17,16 +19,19 @@ import hana_ml.dataframe as dataframe
 import os
 from dotenv import load_dotenv
 load_dotenv()
+
 # Provide the credentials to connect to HANA Cloud DB
 HANA_HOST = os.getenv('HANA_HOST_VECTOR')
-HANA_USER = os.getenv('HANA_VECTOR_USER') 
-HANA_PASSWD = os.getenv('HANA_VECTOR_PASS') 
+HANA_USER = os.getenv('HANA_VECTOR_USER')
+HANA_PASSWD = os.getenv('HANA_VECTOR_PASS')
+
 # APIs
 DEPLOYMENT_URL = os.getenv('AICORE_BASE_URL')  # API base endpoint
 RESOURCE_GROUP = os.getenv('AICORE_RESOURCE_GROUP')  # Resource Group ID
-TOKEN_URL = os.getenv('AICORE_AUTH_URL')  # URL to get the token
+TOKEN_URL = os.getenv('AICORE_AUTH_URL') + '/oauth/token'  # URL to get the token
 CLIENT_ID = os.getenv('AICORE_CLIENT_ID')  # Client ID for authentication
 CLIENT_SECRET = os.getenv('AICORE_CLIENT_SECRET')  # Client Secret for authentication
+
 # Function to get the access token
 def get_access_token():
     data = {
@@ -39,33 +44,40 @@ def get_access_token():
         return response.json().get("access_token")
     else:
         raise Exception(f"Error getting token: {response.status_code} - {response.text}")
+
 # Get the access token
-    TOKEN = get_access_token()
+TOKEN = get_access_token()
+
 # Establish connections
 conn = dataframe.ConnectionContext(
-    address= HANA_HOST,             
+    address= HANA_HOST,
     port=443,
     user=HANA_USER,
     password=HANA_PASSWD,
     encrypt='true'
 )
-conn1 = dbapi.connect( 
+conn1 = dbapi.connect(
     address=HANA_HOST,
-    port=443, 
+    port=443,
     user=HANA_USER,
     password=HANA_PASSWD
 )
+
 # Here is the User Prompt. Change it to query against the text that was ingested
 prompt = "What are the reviews about Tacos?"
+
 # Here we convert your input to a vector using the Azure ada embedding model
 res = embeddings.create(input=prompt, model="text-embedding-ada-002")
 query_vector = res.data[0].embedding
+
 # We query the DB with the embedded response from the user prompt
 sql = '''SELECT TOP {k}  "FILENAME","TEXT" , TO_NVARCHAR("VECTOR") AS VECTOR_STR ,"{metric}"("VECTOR", TO_REAL_VECTOR('{qv}')) as SCORING
-                  FROM "VECTOR_DEMO"."REVIEWS_TARGET"  
+                  FROM "VECTOR_DEMO"."REVIEWS_TARGET"
                   ORDER BY "{metric}"("VECTOR", TO_REAL_VECTOR('{qv}')) {sort}'''.format(k=10, metric="COSINE_SIMILARITY", qv=query_vector, sort="DESC")
+
 hdf = conn.sql(sql)
-res = hdf.head(10).collect() 
+res = hdf.head(10).collect()
+
 # Collect the response from the previous SQL
 # Configure headers for API
 headers = {
@@ -73,6 +85,7 @@ headers = {
     "Content-Type": "application/json",
     "Authorization": f"Bearer {TOKEN}"
 }
+
 # Now loop around every row to get filename, text, and data
 if not res.empty:
     db_results = [(row['FILENAME'], row['TEXT'], row['SCORING']) for _, row in res.iterrows()]
@@ -100,6 +113,7 @@ if not res.empty:
             # Printing the result
             new_tuple = (filename, text, scoring, sentiment)
             new_results.append(new_tuple)
-# Transform the results to a DF and check the output                       
+
+# Transform the results to a DF and check the output
 df_new_results = pd.DataFrame(new_results)
 print(df_new_results)
